@@ -66,6 +66,8 @@ function App() {
     return localStorage.getItem(GROUP_MODE_KEY) || 'regroup';
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [loadingEmailCount, setLoadingEmailCount] = useState(0);
+  const [totalEmailCount, setTotalEmailCount] = useState(0);
   const hasCachedData = treemapData !== null && treemapData.length > 0;
   
   console.log('[App] Render state:', { 
@@ -227,6 +229,9 @@ function App() {
     try {
       setError(null);
       setIsLoading(true);
+      setLoadingEmailCount(0);
+      setTotalEmailCount(0);
+      
       const response = await gapi.client.gmail.users.messages.list({
         'userId': 'me',
         'q': 'is:unread',
@@ -235,10 +240,12 @@ function App() {
 
       if (response.result.messages) {
         const messages = response.result.messages;
+        setTotalEmailCount(messages.length);
         const senderMap = new Map();
-        const batchSize = 20; // Reduced from 50 to avoid rate limits
-        let baseDelay = 500; // Start with 500ms between batches
+        const batchSize = 50;
+        let baseDelay = 500;
         let consecutiveRateLimits = 0;
+        let processedCount = 0;
 
         // Helper to fetch with rate limit detection and retry
         const fetchWithRetry = async (messageId, retries = 3) => {
@@ -276,6 +283,7 @@ function App() {
           let rateLimitHit = false;
           
           for (const { success, data: msgDetail } of results) {
+            processedCount++;
             if (!success) {
               rateLimitHit = true;
               continue;
@@ -290,6 +298,8 @@ function App() {
               senderMap.set(email, { count: (senderMap.get(email)?.count || 0) + 1, domain });
             }
           }
+
+          setLoadingEmailCount(processedCount);
 
           // Adapt delay based on rate limiting
           if (rateLimitHit) {
@@ -333,6 +343,8 @@ function App() {
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
+      setLoadingEmailCount(0);
+      setTotalEmailCount(0);
     }
   }, []);
 
@@ -521,10 +533,14 @@ function App() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      {treemapData === null ? (
+      {treemapData === null || isRefreshing ? (
         <div className="flex flex-1 flex-col items-center justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-          <p className="text-muted-foreground">Analyzing emails...</p>
+          <p className="text-muted-foreground">
+            {totalEmailCount > 0 
+              ? `Analyzing emails... (${loadingEmailCount}/${totalEmailCount})`
+              : 'Analyzing emails...'}
+          </p>
         </div>
       ) : treemapData.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center">
@@ -534,12 +550,6 @@ function App() {
         </div>
       ) : (
         <div className="flex-1 relative overflow-hidden">
-          {isRefreshing && (
-            <div className="absolute top-2 right-2 z-10 bg-background/80 backdrop-blur px-3 py-1 rounded-full flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              <span className="text-sm text-muted-foreground">Refreshing...</span>
-            </div>
-          )}
           <Suspense fallback={
             <div className="flex items-center justify-center h-full">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
