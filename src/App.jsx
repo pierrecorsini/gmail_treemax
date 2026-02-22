@@ -232,14 +232,26 @@ function App() {
       setLoadingEmailCount(0);
       setTotalEmailCount(0);
       
-      const response = await gapi.client.gmail.users.messages.list({
-        'userId': 'me',
-        'q': 'is:unread',
-        'maxResults': 500
-      });
+      // Fetch all unread emails with pagination
+      const allMessages = [];
+      let pageToken = null;
+      
+      do {
+        const response = await gapi.client.gmail.users.messages.list({
+          'userId': 'me',
+          'q': 'is:unread',
+          'maxResults': 250,
+          'pageToken': pageToken
+        });
+        
+        if (response.result.messages) {
+          allMessages.push(...response.result.messages);
+        }
+        pageToken = response.result.nextPageToken || null;
+      } while (pageToken);
 
-      if (response.result.messages) {
-        const messages = response.result.messages;
+      if (allMessages.length > 0) {
+        const messages = allMessages;
         setTotalEmailCount(messages.length);
         const senderMap = new Map();
         const batchSize = 50;
