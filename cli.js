@@ -3,20 +3,18 @@
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { createRequire } from 'module';
 
-const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 console.log('\n🚀 Starting Gmail Treemax...\n');
 console.log('📧 Opening in your browser...\n');
 
-// Start Vite dev server
-const vite = spawn('npx', ['vite', '--host', '--open'], {
+// Start Vite dev server using local vite
+const vite = spawn('node', [join(__dirname, 'node_modules/vite/bin/vite.js'), '--host', '--open'], {
   cwd: __dirname,
   stdio: 'inherit',
-  shell: true
+  shell: process.platform === 'win32'
 });
 
 vite.on('error', (err) => {
