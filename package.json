@@ -7,8 +7,12 @@
     "type": "git",
     "url": "git+https://github.com/pierrecorsini/gmail_treemax.git"
   },
+  "bin": {
+    "gmail_treemax": "./cli.js"
+  },
   "files": [
     "src",
+    "cli.js",
     "index.html",
     "vite.config.js",
     "tailwind.config.js",
