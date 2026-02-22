@@ -1,0 +1,32 @@
+.treemap-container {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: transparent;
+}
+
+.treemap-container svg {
+  display: block;
+}
+
+.treemap-tooltip {
+  background: rgba(0, 5, 11, 0.9);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.treemap-tooltip-title {
+  font-weight: bold;
+  margin-bottom: 2px;
+}
+
+.treemap-tooltip-value {
+  opacity: 0.9;
+}
