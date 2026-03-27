@@ -17,7 +17,8 @@
     "vite.config.js",
     "tailwind.config.js",
     "postcss.config.js",
-    "jsconfig.json"
+    "jsconfig.json",
+    "package-lock.json"
   ],
   "scripts": {
     "dev": "vite",

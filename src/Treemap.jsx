@@ -1,4 +1,4 @@
-import { useMemo, memo, useRef, useEffect, useState } from 'react';
+import { useMemo, memo, useRef, useEffect, useState, useCallback } from 'react';
 import { TreeMap, TreeMapSeries, TreeMapRect } from 'reaviz';
 import './Treemap.css';
 
@@ -6,7 +6,6 @@ import './Treemap.css';
 const CustomTreeMapLabel = ({ data, fontSize = 11, fill = '#FFF' }) => {
   if (!data) return null;
   
-  // Guard against NaN values in coordinates
   const x0 = Number.isFinite(data.x0) ? data.x0 : 0;
   const x1 = Number.isFinite(data.x1) ? data.x1 : 0;
   const y0 = Number.isFinite(data.y0) ? data.y0 : 0;
@@ -27,11 +26,9 @@ const CustomTreeMapLabel = ({ data, fontSize = 11, fill = '#FFF' }) => {
   
   if (maxLines < 1) return null;
   
-  // Estimate chars per line (monospace approximation)
   const avgCharWidth = fontSize * 0.5;
   const charsPerLine = Math.max(1, Math.floor(availableWidth / avgCharWidth));
   
-  // Build wrapped lines
   const lines = [];
   let remaining = text;
   
@@ -40,7 +37,6 @@ const CustomTreeMapLabel = ({ data, fontSize = 11, fill = '#FFF' }) => {
       lines.push(remaining);
       break;
     }
-    // Find break point (prefer space)
     let breakIdx = charsPerLine;
     const spaceIdx = remaining.lastIndexOf(' ', charsPerLine);
     if (spaceIdx > 0) breakIdx = spaceIdx;
@@ -51,7 +47,6 @@ const CustomTreeMapLabel = ({ data, fontSize = 11, fill = '#FFF' }) => {
   
   if (lines.length === 0) return null;
   
-  // Add count line if space allows
   const countText = `${count} unread`;
   if (lines.length < maxLines) {
     lines.push(countText);
@@ -79,41 +74,18 @@ const CustomTreeMapLabel = ({ data, fontSize = 11, fill = '#FFF' }) => {
 };
 
 // Transform data from {id, name, size} to reaviz format {key, data}
-// groupThreshold: minimum email count to show separately (senders with < threshold are grouped/hidden)
-// groupMode: 'regroup' to combine into "Others", 'hide' to remove completely
 const transformData = (data, groupThreshold = 0, groupMode = 'regroup') => {
-  console.log('[Treemap] transformData called:', { 
-    dataLength: data?.length, 
-    groupThreshold, 
-    groupMode,
-    firstItem: data?.[0]
-  });
-  
-  if (!data || data.length === 0) {
-    console.log('[Treemap] transformData: no data, returning []');
-    return [];
-  }
+  if (!data || data.length === 0) return [];
 
-  // Filter out items with invalid size values and ensure positive numbers
   const validData = data.filter(item => {
     const size = Number(item.size);
-    const valid = Number.isFinite(size) && size > 0;
-    if (!valid) {
-      console.log('[Treemap] Invalid item filtered out:', item);
-    }
-    return valid;
+    return Number.isFinite(size) && size > 0;
   });
 
-  console.log('[Treemap] transformData validData count:', validData.length);
-
-  if (validData.length === 0) {
-    console.log('[Treemap] transformData: no valid data, returning []');
-    return [];
-  }
+  if (validData.length === 0) return [];
 
   const sortedData = [...validData].sort((a, b) => b.size - a.size);
 
-  // If no threshold, return all data
   if (groupThreshold <= 0) {
     return sortedData.map((item, index) => ({
       key: item.name || item.id || `item-${index}`,
@@ -127,11 +99,9 @@ const transformData = (data, groupThreshold = 0, groupMode = 'regroup') => {
     }));
   }
 
-  // Separate senders by threshold (senders with size < threshold are "small")
   const bigSenders = sortedData.filter(item => item.size >= groupThreshold);
   const smallSenders = sortedData.filter(item => item.size < groupThreshold);
 
-  // If hide mode, just return big senders
   if (groupMode === 'hide') {
     return bigSenders.map((item, index) => ({
       key: item.name || item.id || `item-${index}`,
@@ -145,7 +115,6 @@ const transformData = (data, groupThreshold = 0, groupMode = 'regroup') => {
     }));
   }
 
-  // Regroup mode: combine small senders into "Others"
   if (smallSenders.length === 0) {
     return bigSenders.map((item, index) => ({
       key: item.name || item.id || `item-${index}`,
@@ -200,100 +169,145 @@ const TooltipContent = ({ data }) => {
           : `${count} emails`
         }
       </div>
+      {!isOthers && (
+        <div className="treemap-tooltip-hint">Click to select/deselect</div>
+      )}
     </div>
   );
 };
 
-function Treemap({ data, groupThreshold = 0, groupMode = 'regroup' }) {
-  console.log('[Treemap] Component rendering with props:', { 
-    dataLength: data?.length, 
-    firstDataItem: data?.[0],
-    groupThreshold, 
-    groupMode 
-  });
-  
+function Treemap({ data, groupThreshold = 0, groupMode = 'regroup', selectedTiles, onTileSelect }) {
   const containerRef = useRef(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-
-  useEffect(() => {
-    const el = containerRef.current;
-    console.log('[Treemap] useEffect - container element:', el);
-    if (!el) return;
-
-    const updateDimensions = () => {
-      const rect = el.getBoundingClientRect();
-      const width = Number.isFinite(rect.width) ? rect.width : 0;
-      const height = Number.isFinite(rect.height) ? rect.height : 0;
-      console.log('[Treemap] updateDimensions:', { width, height });
-      if (width > 0 && height > 0) {
-        setDimensions({ width, height });
-      }
-    };
-
-    const rafId = requestAnimationFrame(updateDimensions);
-
-    const ro = new ResizeObserver((entries) => {
-      const rect = entries[0]?.contentRect;
-      if (!rect) {
-        console.log('[Treemap] ResizeObserver: no rect');
-        return;
-      }
-      const width = Number.isFinite(rect.width) ? rect.width : 0;
-      const height = Number.isFinite(rect.height) ? rect.height : 0;
-      console.log('[Treemap] ResizeObserver:', { width, height });
-      if (width > 0 && height > 0) {
-        setDimensions({ width, height });
-      }
-    });
-    ro.observe(el);
-
-    return () => {
-      cancelAnimationFrame(rafId);
-      ro.disconnect();
-    };
-  }, []);
 
   const treemapData = useMemo(
     () => transformData(data, groupThreshold, groupMode),
     [data, groupThreshold, groupMode]
   );
 
-  console.log('[Treemap] After transform:', { 
-    treemapDataLength: treemapData?.length,
-    firstTreemapItem: treemapData?.[0],
-    dimensions 
-  });
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    let timeout;
+    const updateDimensions = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        const rect = el.getBoundingClientRect();
+        const width = Number.isFinite(rect.width) ? rect.width : 0;
+        const height = Number.isFinite(rect.height) ? rect.height : 0;
+        if (width > 0 && height > 0) {
+          setDimensions({ width, height });
+        }
+      }, 100);
+    };
+
+    requestAnimationFrame(updateDimensions);
+
+    const ro = new ResizeObserver(updateDimensions);
+    ro.observe(el);
+
+    return () => { clearTimeout(timeout); ro.disconnect(); };
+  }, []);
+
+  // Handle clicks using event delegation on the container
+  const handleContainerClick = useCallback((event) => {
+    const target = event.target;
+    
+    // Only handle clicks on rect elements
+    if (target.tagName.toLowerCase() !== 'rect') return;
+    
+    // Find the svg and get all rects to determine the index
+    const svg = target.closest('svg');
+    if (!svg) return;
+    
+    const rects = svg.querySelectorAll('rect');
+    const rectIndex = Array.from(rects).indexOf(target);
+    
+    if (rectIndex === -1 || rectIndex >= treemapData.length) return;
+    
+    const clickedItem = treemapData[rectIndex];
+    const email = clickedItem?.metadata?.id;
+    const isOthers = clickedItem?.metadata?.isOthers;
+    
+    if (isOthers || !email) return;
+    onTileSelect?.(email);
+  }, [treemapData, onTileSelect]);
+
+  // Apply selection highlights after render
+  useEffect(() => {
+    if (!containerRef.current || !selectedTiles || !treemapData.length) return;
+
+    const svg = containerRef.current.querySelector('svg');
+    if (!svg) return;
+
+    const rects = svg.querySelectorAll('rect');
+    
+    rects.forEach((rect, index) => {
+      if (index < treemapData.length) {
+        const item = treemapData[index];
+        const email = item?.metadata?.id;
+        const isSelected = email && selectedTiles.has(email);
+        
+        if (isSelected) {
+          rect.setAttribute('stroke', '#06b6d4');
+          rect.setAttribute('stroke-width', '3');
+          rect.style.filter = 'drop-shadow(0 0 8px rgba(6, 182, 212, 0.8))';
+        } else {
+          rect.removeAttribute('stroke');
+          rect.removeAttribute('stroke-width');
+          rect.style.filter = '';
+        }
+      }
+    });
+  }, [selectedTiles, treemapData, dimensions]);
 
   const hasData = data && data.length > 0 && treemapData && treemapData.length > 0;
   const safeWidth = Number.isFinite(dimensions.width) ? Math.max(1, dimensions.width) : 0;
   const safeHeight = Number.isFinite(dimensions.height) ? Math.max(1, dimensions.height) : 0;
   const canRender = hasData && safeWidth >= 10 && safeHeight >= 10;
 
-  console.log('[Treemap] Render check:', { hasData, safeWidth, safeHeight, canRender });
+  const selectedCount = useMemo(() => {
+    if (!selectedTiles?.size || !treemapData?.length) return 0;
+    return treemapData.filter(item => 
+      item.metadata?.id && selectedTiles.has(item.metadata.id)
+    ).length;
+  }, [treemapData, selectedTiles]);
 
   return (
-    <div ref={containerRef} className="treemap-container">
+    <div 
+      ref={containerRef} 
+      className="treemap-container"
+      onClick={handleContainerClick}
+    >
       {canRender && (
-        <TreeMap
-          width={safeWidth}
-          height={safeHeight}
-          data={treemapData}
-          paddingInner={2}
-          paddingOuter={0}
-          paddingTop={0}
-          series={
-            <TreeMapSeries
-              colorScheme='unifyviz'
-              rect={
-                <TreeMapRect
-                  cursor="pointer"
-                  tooltip={<TooltipContent />}
-                />
-              }
-              label={<CustomTreeMapLabel />}
-            />
-          }
-        />
+        <>
+          <TreeMap
+            width={safeWidth}
+            height={safeHeight}
+            data={treemapData}
+            paddingInner={2}
+            paddingOuter={0}
+            paddingTop={0}
+            series={
+              <TreeMapSeries
+                colorScheme='unifyviz'
+                rect={
+                  <TreeMapRect
+                    cursor="pointer"
+                    tooltip={<TooltipContent />}
+                  />
+                }
+                label={<CustomTreeMapLabel />}
+              />
+            }
+          />
+          {selectedCount > 0 && (
+            <div className="selection-indicator">
+              {selectedCount} tile{selectedCount > 1 ? 's' : ''} selected
+            </div>
+          )}
+        </>
       )}
     </div>
   );

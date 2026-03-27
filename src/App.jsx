@@ -1,15 +1,15 @@
 import { useState, useCallback, lazy, Suspense, useEffect } from 'react';
 import { gapi } from 'gapi-script';
-import { Loader2, Mail, LogOut, RefreshCw } from 'lucide-react';
+import { Loader2, Mail, LogOut, RefreshCw, Trash2, Copy, Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+
 import { Alert, AlertDescription } from '@/components/ui/alert';
 const Treemap = lazy(() => import('./Treemap.jsx'));
 import SetupGuide from './SetupGuide.jsx';
 
-console.log('[App.jsx] All imports loaded');
+
 
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest';
 const SCOPES = 'https://www.googleapis.com/auth/gmail.readonly';
@@ -30,8 +30,19 @@ const loadFromStorage = (key, defaultValue) => {
   }
 };
 
+// Helper to safely save to localStorage with quota handling
+const saveToStorage = (key, value) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    if (e.name === 'QuotaExceededError') {
+      localStorage.removeItem(TREEMAP_DATA_KEY);
+      localStorage.removeItem(TOTAL_UNREAD_KEY);
+    }
+  }
+};
+
 function App() {
-  console.log('[App] function App() called');
   const [clientId, setClientId] = useState(() => localStorage.getItem(STORAGE_KEY) || '');
   const [needsSetup, setNeedsSetup] = useState(() => !localStorage.getItem(STORAGE_KEY));
   const [tokenClient, setTokenClient] = useState(null);
@@ -40,8 +51,6 @@ function App() {
   const [error, setError] = useState(null);
   const [treemapData, setTreemapData] = useState(() => {
     const saved = loadFromStorage(TREEMAP_DATA_KEY, null);
-    console.log('[App] Loading cached data:', { saved: saved?.length, firstItem: saved?.[0] });
-    // Validate cached data structure
     if (saved && Array.isArray(saved)) {
       const valid = saved.filter(item => 
         item && 
@@ -49,7 +58,6 @@ function App() {
         Number.isFinite(item.size) && 
         item.size > 0
       );
-      console.log('[App] Valid cached items:', valid.length);
       return valid.length > 0 ? valid : null;
     }
     return null;
@@ -68,16 +76,9 @@ function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadingEmailCount, setLoadingEmailCount] = useState(0);
   const [totalEmailCount, setTotalEmailCount] = useState(0);
+  const [selectedTiles, setSelectedTiles] = useState(() => new Set());
+  const [copySuccess, setCopySuccess] = useState(false);
   const hasCachedData = treemapData !== null && treemapData.length > 0;
-  
-  console.log('[App] Render state:', { 
-    isAuthenticated, 
-    hasCachedData, 
-    treemapDataLength: treemapData?.length,
-    isLoading,
-    needsSetup,
-    tokenClient: !!tokenClient
-  });
 
   useEffect(() => {
     if (clientId && !needsSetup) {
@@ -343,8 +344,8 @@ function App() {
         setTreemapData(data);
         
         // Persist to localStorage
-        localStorage.setItem(TREEMAP_DATA_KEY, JSON.stringify(data));
-        localStorage.setItem(TOTAL_UNREAD_KEY, total.toString());
+        saveToStorage(TREEMAP_DATA_KEY, JSON.stringify(data));
+        saveToStorage(TOTAL_UNREAD_KEY, total.toString());
       } else {
         setTreemapData([]);
         setTotalUnread(0);
@@ -367,6 +368,47 @@ function App() {
     }
   }, [isAuthenticated, fetchUnreadEmails]);
 
+  const handleClearData = useCallback(() => {
+    setTreemapData(null);
+    setTotalUnread(0);
+    setSelectedTiles(new Set());
+    localStorage.removeItem(TREEMAP_DATA_KEY);
+    localStorage.removeItem(TOTAL_UNREAD_KEY);
+  }, []);
+
+  const handleTileSelect = useCallback((email) => {
+    setSelectedTiles(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(email)) {
+        newSet.delete(email);
+      } else {
+        newSet.add(email);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedTiles(new Set());
+  }, []);
+
+  const handleCopyFilter = useCallback(async () => {
+    if (selectedTiles.size === 0) return;
+    
+    const emails = Array.from(selectedTiles);
+    const filter = emails.length === 1 
+      ? `from:${emails[0]}`
+      : `from:(${emails.join(' OR ')})`;
+    
+    try {
+      await navigator.clipboard.writeText(filter);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy filter:', err);
+    }
+  }, [selectedTiles]);
+
   const handleGroupThresholdChange = useCallback((value) => {
     const threshold = parseInt(value, 10) || 0;
     const maxThreshold = treemapData ? Math.max(...treemapData.map(d => d.size)) : 0;
@@ -385,7 +427,6 @@ function App() {
     : 0;
 
   if (isLoading && !tokenClient && !needsSetup) {
-    console.log('[App] RENDERING: Loading screen');
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="flex flex-col items-center gap-4">
@@ -397,7 +438,6 @@ function App() {
   }
 
   if (!isAuthenticated && !hasCachedData) {
-    console.log('[App] RENDERING: Login/setup screen');
     return (
       <div className="container mx-auto max-w-4xl p-6">
         <div className="text-center mb-8">
@@ -438,43 +478,62 @@ function App() {
 
   // Show cached data even when not authenticated
   if (!isAuthenticated && hasCachedData) {
-    console.log('[App] RENDERING: Cached data screen (not authenticated)');
     return (
       <div className="h-screen flex flex-col overflow-hidden">
         <header className="flex-shrink-0 flex justify-between items-center px-4 py-2 border-b">
           <h1 className="text-xl font-bold">Email Treemap Visualizer</h1>
           <div className="flex items-center gap-6">
-            {treemapData && treemapData.length > 0 && (
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Label className="text-sm whitespace-nowrap">Min emails to show:</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={maxThreshold}
-                    value={groupThreshold}
-                    onChange={(e) => handleGroupThresholdChange(e.target.value)}
-                    className="w-16 h-8"
-                  />
-                </div>
-                <div className="flex items-center gap-2 border-l pl-4">
-                  <Label className="text-sm">Senders below:</Label>
-                  <select
-                    value={groupMode}
-                    onChange={(e) => handleGroupModeChange(e.target.value)}
-                    className="h-8 px-2 text-sm border rounded bg-background"
-                  >
-                    <option value="regroup">Regroup</option>
-                    <option value="hide">Hide</option>
-                  </select>
-                </div>
-              </div>
-            )}
-            <span className="text-primary font-semibold">{totalUnread} unread emails</span>
-            <Button onClick={handleLogin} size="sm" disabled={isLoading}>
-              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Sign in to Refresh
-            </Button>
+          {treemapData && treemapData.length > 0 && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Senders with fewer than</span>
+              <Input
+                type="number"
+                min={0}
+                max={maxThreshold}
+                value={groupThreshold}
+                onChange={(e) => handleGroupThresholdChange(e.target.value)}
+                className="w-14 h-7 text-sm"
+              />
+              <span className="text-muted-foreground">emails:</span>
+              <select
+                value={groupMode}
+                onChange={(e) => handleGroupModeChange(e.target.value)}
+                className="h-7 px-2 text-sm border rounded bg-background"
+              >
+                <option value="regroup">Group as "Other"</option>
+                <option value="hide">Hide completely</option>
+              </select>
+            </div>
+          )}
+          <span className="text-primary font-semibold">{totalUnread} unread emails</span>
+          <Button variant="outline" size="sm" onClick={handleClearData} className="text-destructive hover:bg-destructive hover:text-destructive-foreground" title="Remove cached email data">
+            <Trash2 className="h-4 w-4 mr-2" />
+            Clear Cache
+          </Button>
+          {selectedTiles.size > 0 && (
+            <>
+              <Button variant="default" size="sm" onClick={handleCopyFilter} className="bg-cyan-600 hover:bg-cyan-700" title="Copy Gmail search filter to clipboard">
+                {copySuccess ? (
+                  <>
+                    <Check className="h-4 w-4 mr-2" />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copy Filter ({selectedTiles.size})
+                  </>
+                )}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleClearSelection} title="Clear selection">
+                <X className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+          <Button onClick={handleLogin} size="sm" disabled={isLoading} title="Sign in to fetch latest emails">
+            {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Sign in to Refresh
+          </Button>
           </div>
         </header>
         {error && (
@@ -488,53 +547,74 @@ function App() {
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
           }>
-            <Treemap data={treemapData} groupThreshold={groupThreshold} groupMode={groupMode} />
+            <Treemap data={treemapData} groupThreshold={groupThreshold} groupMode={groupMode} selectedTiles={selectedTiles} onTileSelect={handleTileSelect} />
           </Suspense>
         </div>
       </div>
     );
   }
 
-  console.log('[App] RENDERING: Authenticated main screen');
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <header className="flex-shrink-0 flex justify-between items-center px-4 py-2 border-b">
         <h1 className="text-xl font-bold">Email Treemap Visualizer</h1>
         <div className="flex items-center gap-6">
           {treemapData && treemapData.length > 0 && (
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Label className="text-sm whitespace-nowrap">Min emails to show:</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={maxThreshold}
-                  value={groupThreshold}
-                  onChange={(e) => handleGroupThresholdChange(e.target.value)}
-                  className="w-16 h-8"
-                />
-              </div>
-              <div className="flex items-center gap-2 border-l pl-4">
-                <Label className="text-sm">Senders below:</Label>
-                <select
-                  value={groupMode}
-                  onChange={(e) => handleGroupModeChange(e.target.value)}
-                  className="h-8 px-2 text-sm border rounded bg-background"
-                >
-                  <option value="regroup">Regroup</option>
-                  <option value="hide">Hide</option>
-                </select>
-              </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Senders with fewer than</span>
+              <Input
+                type="number"
+                min={0}
+                max={maxThreshold}
+                value={groupThreshold}
+                onChange={(e) => handleGroupThresholdChange(e.target.value)}
+                className="w-14 h-7 text-sm"
+              />
+              <span className="text-muted-foreground">emails:</span>
+              <select
+                value={groupMode}
+                onChange={(e) => handleGroupModeChange(e.target.value)}
+                className="h-7 px-2 text-sm border rounded bg-background"
+              >
+                <option value="regroup">Group as "Other"</option>
+                <option value="hide">Hide completely</option>
+              </select>
             </div>
           )}
           <span className="text-primary font-semibold">{totalUnread} unread emails</span>
           {isAuthenticated && (
-            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing}>
+            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing} title="Fetch latest unread emails">
               <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={handleLogout}>
+          {hasCachedData && (
+            <Button variant="outline" size="sm" onClick={handleClearData} className="text-destructive hover:bg-destructive hover:text-destructive-foreground" title="Remove cached email data">
+              <Trash2 className="h-4 w-4 mr-2" />
+              Clear Cache
+            </Button>
+          )}
+          {selectedTiles.size > 0 && (
+            <>
+              <Button variant="default" size="sm" onClick={handleCopyFilter} className="bg-cyan-600 hover:bg-cyan-700" title="Copy Gmail search filter to clipboard">
+                {copySuccess ? (
+                  <>
+                    <Check className="h-4 w-4 mr-2" />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copy Filter ({selectedTiles.size})
+                  </>
+                )}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleClearSelection} title="Clear selection">
+                <X className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+          <Button variant="outline" size="sm" onClick={handleLogout} title="Sign out of your Google account">
             <LogOut className="h-4 w-4 mr-2" />
             Logout
           </Button>
@@ -567,7 +647,7 @@ function App() {
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
           }>
-            <Treemap data={treemapData} groupThreshold={groupThreshold} groupMode={groupMode} />
+            <Treemap data={treemapData} groupThreshold={groupThreshold} groupMode={groupMode} selectedTiles={selectedTiles} onTileSelect={handleTileSelect} />
           </Suspense>
         </div>
       )}

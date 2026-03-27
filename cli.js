@@ -22,7 +22,7 @@ npmInstall.on('error', (err) => {
 
 npmInstall.on('close', (code) => {
   if (code !== 0) {
-    console.error('npm install failed with code:', code);
+    console.error('npm ci failed with code:', code);
     process.exit(code);
   }
 

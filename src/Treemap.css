@@ -30,3 +30,57 @@
 .treemap-tooltip-value {
   opacity: 0.9;
 }
+
+.treemap-tooltip-hint {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.treemap-svg-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.selection-indicator {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  background: rgba(6, 182, 212, 0.95);
+  color: white;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.selection-overlay-info {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  background: rgba(6, 182, 212, 0.9);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Make rects clickable */
+.treemap-container rect {
+  cursor: pointer;
+  transition: stroke 0.15s ease, stroke-width 0.15s ease, filter 0.15s ease;
+}
+
+.treemap-container rect:hover {
+  stroke: rgba(255, 255, 255, 0.6);
+  stroke-width: 2;
+}
