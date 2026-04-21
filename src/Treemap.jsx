@@ -238,28 +238,36 @@ function Treemap({ data, groupThreshold = 0, groupMode = 'regroup', selectedTile
   useEffect(() => {
     if (!containerRef.current || !selectedTiles || !treemapData.length) return;
 
-    const svg = containerRef.current.querySelector('svg');
-    if (!svg) return;
+    // Use rAF to ensure styles apply after reaviz finishes rendering
+    const raf = requestAnimationFrame(() => {
+      const container = containerRef.current;
+      if (!container) return;
 
-    const rects = svg.querySelectorAll('rect');
-    
-    rects.forEach((rect, index) => {
-      if (index < treemapData.length) {
-        const item = treemapData[index];
-        const email = item?.metadata?.id;
-        const isSelected = email && selectedTiles.has(email);
-        
-        if (isSelected) {
-          rect.setAttribute('stroke', '#06b6d4');
-          rect.setAttribute('stroke-width', '3');
-          rect.style.filter = 'drop-shadow(0 0 8px rgba(6, 182, 212, 0.8))';
-        } else {
-          rect.removeAttribute('stroke');
-          rect.removeAttribute('stroke-width');
-          rect.style.filter = '';
+      const svg = container.querySelector('svg');
+      if (!svg) return;
+
+      const rects = svg.querySelectorAll('rect');
+      
+      rects.forEach((rect, index) => {
+        if (index < treemapData.length) {
+          const item = treemapData[index];
+          const email = item?.metadata?.id;
+          const isSelected = email && selectedTiles.has(email);
+          
+          if (isSelected) {
+            rect.setAttribute('stroke', '#000000');
+            rect.setAttribute('stroke-width', '3');
+            rect.style.filter = 'drop-shadow(0 0 6px rgba(0, 0, 0, 0.6))';
+          } else {
+            rect.removeAttribute('stroke');
+            rect.removeAttribute('stroke-width');
+            rect.style.filter = '';
+          }
         }
-      }
+      });
     });
+
+    return () => cancelAnimationFrame(raf);
   }, [selectedTiles, treemapData, dimensions]);
 
   const hasData = data && data.length > 0 && treemapData && treemapData.length > 0;

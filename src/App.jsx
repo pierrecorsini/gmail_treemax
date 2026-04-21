@@ -396,9 +396,10 @@ function App() {
     if (selectedTiles.size === 0) return;
     
     const emails = Array.from(selectedTiles);
-    const filter = emails.length === 1 
+    const fromFilter = emails.length === 1 
       ? `from:${emails[0]}`
       : `from:(${emails.join(' OR ')})`;
+    const filter = `${fromFilter} is:unread`;
     
     try {
       await navigator.clipboard.writeText(filter);
