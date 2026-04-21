@@ -10,7 +10,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ['react', 'react-dom/client', 'react-dom', 'focus-trap-react']
+    include: ['react', 'react-dom/client', 'react-dom', 'focus-trap-react', 'react-highlight-words']
   },
   server: {
     port: 3000,
