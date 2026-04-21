@@ -2,7 +2,9 @@
 
 Visualize your unread Gmail emails by sender using an interactive treemap.
 
-## Quick Start
+**Try it live:** [https://pierrecorsini.github.io/gmail_treemax/](https://pierrecorsini.github.io/gmail_treemax/)
+
+## Self-host quick start
 
 1. Audit the repo
 2. Run ```npx github:pierrecorsini/gmail_treemax```
