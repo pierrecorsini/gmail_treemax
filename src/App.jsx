@@ -19,6 +19,9 @@ const GROUP_THRESHOLD_KEY = 'treemapGroupThreshold';
 const GROUP_MODE_KEY = 'treemapGroupMode';
 const TREEMAP_DATA_KEY = 'treemapData';
 const TOTAL_UNREAD_KEY = 'treemapTotalUnread';
+const MESSAGE_LIST_PAGE_SIZE = 500;
+const MESSAGE_FETCH_CONCURRENCY = 24;
+const PROGRESS_UPDATE_INTERVAL = 20;
 
 // Helper to safely parse JSON from localStorage
 const loadFromStorage = (key, defaultValue) => {
@@ -40,6 +43,17 @@ const saveToStorage = (key, value) => {
       localStorage.removeItem(TOTAL_UNREAD_KEY);
     }
   }
+};
+
+const extractEmailAddress = (fromHeaderValue) => {
+  if (!fromHeaderValue || typeof fromHeaderValue !== 'string') return null;
+  const angleBracketMatch = fromHeaderValue.match(EMAIL_REGEX);
+  if (angleBracketMatch?.[1]) return angleBracketMatch[1].trim().toLowerCase();
+
+  const plainEmailMatch = fromHeaderValue.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  if (plainEmailMatch?.[0]) return plainEmailMatch[0].trim().toLowerCase();
+
+  return null;
 };
 
 function App() {
@@ -241,7 +255,8 @@ function App() {
         const response = await gapi.client.gmail.users.messages.list({
           'userId': 'me',
           'q': 'is:unread',
-          'maxResults': 250,
+          'maxResults': MESSAGE_LIST_PAGE_SIZE,
+          'fields': 'messages/id,nextPageToken,resultSizeEstimate',
           'pageToken': pageToken
         });
         
@@ -255,28 +270,29 @@ function App() {
         const messages = allMessages;
         setTotalEmailCount(messages.length);
         const senderMap = new Map();
-        const batchSize = 50;
-        let baseDelay = 500;
-        let consecutiveRateLimits = 0;
         let processedCount = 0;
 
         // Helper to fetch with rate limit detection and retry
-        const fetchWithRetry = async (messageId, retries = 3) => {
+        const fetchWithRetry = async (messageId, retries = 4) => {
           for (let attempt = 0; attempt < retries; attempt++) {
             try {
               const result = await gapi.client.gmail.users.messages.get({
                 'userId': 'me',
                 'id': messageId,
                 'format': 'metadata',
-                'metadataHeaders': ['From']
+                'metadataHeaders': ['From'],
+                'fields': 'payload/headers'
               });
               return { success: true, data: result };
             } catch (err) {
-              if (err.status === 429) {
-                // Rate limited - exponential backoff
-                const backoffDelay = Math.min(5000 * Math.pow(2, attempt), 30000);
-                console.warn(`Rate limited, waiting ${backoffDelay}ms before retry...`);
-                await new Promise(resolve => setTimeout(resolve, backoffDelay));
+              const isRateLimit =
+                err?.status === 429 ||
+                err?.status === 403 ||
+                /rate|quota|too many requests/i.test(err?.result?.error?.message || err?.message || '');
+
+              if (isRateLimit) {
+                const backoffDelay = Math.min(600 * Math.pow(2, attempt), 8000);
+                await new Promise(resolve => setTimeout(resolve, backoffDelay + Math.floor(Math.random() * 150)));
               } else {
                 return { success: false, data: null };
               }
@@ -285,51 +301,46 @@ function App() {
           return { success: false, data: null };
         };
 
-        for (let i = 0; i < messages.length; i += batchSize) {
-          const batch = messages.slice(i, Math.min(i + batchSize, messages.length));
-          
-          // Fetch messages with retry logic
-          const results = await Promise.all(
-            batch.map(message => fetchWithRetry(message.id))
-          );
+        let cursor = 0;
+        const workerCount = Math.min(MESSAGE_FETCH_CONCURRENCY, messages.length);
 
-          let rateLimitHit = false;
-          
-          for (const { success, data: msgDetail } of results) {
-            processedCount++;
-            if (!success) {
-              rateLimitHit = true;
+        const workers = Array.from({ length: workerCount }, () => (async () => {
+          while (cursor < messages.length) {
+            const currentIndex = cursor;
+            cursor += 1;
+            const message = messages[currentIndex];
+            if (!message?.id) {
+              processedCount += 1;
               continue;
             }
-            if (!msgDetail?.result?.payload?.headers) continue;
-            const fromHeader = msgDetail.result.payload.headers.find(h => h.name === 'From');
-            if (fromHeader) {
-              const emailMatch = fromHeader.value.match(EMAIL_REGEX);
-              const email = emailMatch ? emailMatch[1] : fromHeader.value;
-              const atIndex = email.lastIndexOf('@');
-              const domain = atIndex > -1 ? email.substring(atIndex + 1) : 'unknown';
-              senderMap.set(email, { count: (senderMap.get(email)?.count || 0) + 1, domain });
+
+            const { success, data: msgDetail } = await fetchWithRetry(message.id);
+            processedCount += 1;
+
+            if (success && msgDetail?.result?.payload?.headers) {
+              const fromHeader = msgDetail.result.payload.headers.find(h => h.name === 'From');
+              const email = extractEmailAddress(fromHeader?.value);
+              if (email) {
+                const atIndex = email.lastIndexOf('@');
+                const domain = atIndex > -1 ? email.substring(atIndex + 1) : 'unknown';
+                senderMap.set(email, { count: (senderMap.get(email)?.count || 0) + 1, domain });
+              }
+            }
+
+            if (
+              processedCount === messages.length ||
+              processedCount % PROGRESS_UPDATE_INTERVAL === 0
+            ) {
+              setLoadingEmailCount(processedCount);
+            }
+
+            if (processedCount % 100 === 0) {
+              await new Promise(resolve => setTimeout(resolve, 0));
             }
           }
+        })());
 
-          setLoadingEmailCount(processedCount);
-
-          // Adapt delay based on rate limiting
-          if (rateLimitHit) {
-            consecutiveRateLimits++;
-            baseDelay = Math.min(baseDelay * 1.5, 5000);
-          } else {
-            consecutiveRateLimits = Math.max(0, consecutiveRateLimits - 1);
-            // Gradually reduce delay if no rate limits
-            if (consecutiveRateLimits === 0) {
-              baseDelay = Math.max(300, baseDelay * 0.9);
-            }
-          }
-
-          if (i + batchSize < messages.length) {
-            await new Promise(resolve => setTimeout(resolve, baseDelay));
-          }
-        }
+        await Promise.all(workers);
 
         const data = Array.from(senderMap, ([email, info]) => ({
           id: email,
